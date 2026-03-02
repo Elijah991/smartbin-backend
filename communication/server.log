@@ -1,0 +1,17 @@
+==================================================
+🚀 SmartBin Backend Server Started
+==================================================
+📡 Server running on port 8000
+🌐 Environment: development
+🔗 API Base URL: http://localhost:8000/api
+==================================================
+✅ Database connected successfully
+2026-01-31T11:15:49.736Z - GET /health
+2026-01-31T11:16:59.987Z - GET /health
+2026-01-31T11:17:00.235Z - GET /favicon.ico
+2026-01-31T11:17:12.100Z - GET /
+2026-01-31T11:17:12.200Z - GET /favicon.ico
+2026-01-31T11:17:26.362Z - GET /api
+2026-01-31T11:17:26.494Z - GET /favicon.ico
+2026-01-31T11:17:31.983Z - GET /api
+2026-01-31T11:17:32.051Z - GET /favicon.ico
