@@ -2,8 +2,11 @@
   "name": "smartbin-backend",
   "version": "1.0.0",
   "description": "",
-  "main": "seed-user.js",
+  "main": "communication/server.js",
   "scripts": {
+    "start": "node communication/server.js",
+    "dev": "NODE_ENV=development node communication/server.js",
+    "seed": "node seed-user.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
