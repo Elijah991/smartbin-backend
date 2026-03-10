@@ -1,5 +1,5 @@
-const db = require('./backend/config/database');
-const bcrypt = require('./communication/node_modules/bcrypt');
+const db = require('./config/database');
+const bcrypt = require('bcryptjs');
 
 // Load env from communication folder
 process.env.DB_HOST = 'localhost';

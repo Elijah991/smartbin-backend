@@ -1,6 +1,6 @@
 require('dotenv').config();
 const { Pool } = require('pg');
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcryptjs');
 
 const seedDatabase = async () => {
     // Parse DATABASE_URL or construct connection string
