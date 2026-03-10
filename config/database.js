@@ -1,26 +1,24 @@
-const mysql = require('mysql2/promise');
+const { Pool } = require('pg');
 require('dotenv').config();
 
-// Create connection pool
-const pool = mysql.createPool({
-    host: process.env.DB_HOST || 'localhost',
-    user: process.env.DB_USER || 'root',
-    password: process.env.DB_PASSWORD || '',
-    database: process.env.DB_NAME || 'smartbin_database',
-    port: process.env.DB_PORT || 3306,
-    waitForConnections: true,
-    connectionLimit: 10,
-    queueLimit: 0,
-    enableKeepAlive: true,
-    keepAliveInitialDelay: 0
+// Parse DATABASE_URL or construct connection string
+const DATABASE_URL = process.env.DATABASE_URL || 
+    `postgres://${process.env.DB_USER || 'user'}:${process.env.DB_PASSWORD || ''}@${process.env.DB_HOST || 'localhost'}:${process.env.DB_PORT || 5432}/${process.env.DB_NAME || 'smartbin_database'}`;
+
+// Create connection pool with SSL configuration for Render.com
+const pool = new Pool({
+    connectionString: DATABASE_URL,
+    ssl: {
+        rejectUnauthorized: false
+    }
 });
 
 // Test database connection
 const testConnection = async () => {
     try {
-        const connection = await pool.getConnection();
+        const client = await pool.connect();
         console.log('✅ Database connected successfully');
-        connection.release();
+        client.release();
     } catch (error) {
         console.error('❌ Database connection failed:', error.message);
         process.exit(1);

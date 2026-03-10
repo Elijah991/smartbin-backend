@@ -17,7 +17,7 @@ const dashboardRoutes = require('../management/dashboard');
 //const db = require('./config/database');
 
 const app = express();
-const PORT = process.env.PORT || 8000;
+const PORT = process.env.PORT || 10000;
 
 // Middleware
 app.use(cors({

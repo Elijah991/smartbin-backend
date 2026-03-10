@@ -1,28 +1,31 @@
 require('dotenv').config();
-const mysql = require('mysql2/promise');
+const { Pool } = require('pg');
 const bcrypt = require('bcrypt');
 
 const seedDatabase = async () => {
-    const pool = mysql.createPool({
-        host: process.env.DB_HOST,
-        user: process.env.DB_USER,
-        password: process.env.DB_PASSWORD,
-        database: process.env.DB_NAME,
-        port: process.env.DB_PORT || 3306
+    // Parse DATABASE_URL or construct connection string
+    const DATABASE_URL = process.env.DATABASE_URL || 
+        `postgres://${process.env.DB_USER || 'user'}:${process.env.DB_PASSWORD || ''}@${process.env.DB_HOST || 'localhost'}:${process.env.DB_PORT || 5432}/${process.env.DB_NAME || 'smartbin_database'}`;
+
+    const pool = new Pool({
+        connectionString: DATABASE_URL,
+        ssl: {
+            rejectUnauthorized: false
+        }
     });
 
     try {
-        const connection = await pool.getConnection();
+        const client = await pool.connect();
         
         // Hash the password
         const hashedPassword = await bcrypt.hash('admin123', 10);
         
         console.log('Inserting demo user...');
         // Insert demo user
-        await connection.query(`
+        await client.query(`
             INSERT INTO users (name, email, password_hash, role, phone, status, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, NOW())
-            ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash), status = 'active'
+            VALUES ($1, $2, $3, $4, $5, $6, NOW())
+            ON CONFLICT (email) DO UPDATE SET password_hash = $3, status = 'active'
         `, ['Admin User', 'admin@smartbin.com', hashedPassword, 'admin', '+1234567890', 'active']);
         
         console.log('✅ Demo user seeded successfully!');
@@ -30,7 +33,7 @@ const seedDatabase = async () => {
         console.log('   Password: admin123');
         console.log('   Role: admin');
         
-        connection.release();
+        client.release();
         await pool.end();
         process.exit(0);
     } catch (error) {
