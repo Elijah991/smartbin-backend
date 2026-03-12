@@ -110,10 +110,11 @@ router.post('/', authenticateToken, authorizeRole('admin'), async (req, res) => 
         }
 
         // Check if email already exists
-        const [existingUsers] = await db.query(
-            'SELECT id FROM users WHERE email = ?',
+        const existingUsersResult = await db.query(
+            'SELECT id FROM users WHERE email = $1',
             [email]
         );
+        const existingUsers = existingUsersResult.rows || [];
 
         if (existingUsers.length > 0) {
             return res.status(409).json({ 
@@ -126,21 +127,35 @@ router.post('/', authenticateToken, authorizeRole('admin'), async (req, res) => 
         const hashedPassword = await bcrypt.hash(password, 10);
 
         // Insert user
-        const [result] = await db.query(
-            'INSERT INTO users (name, email, password_hash, role, phone, status) VALUES (?, ?, ?, ?, ?, ?)',
-            [name, email, hashedPassword, role || 'collector', phone || null, 'active']
-        );
+        const insertQuery = `
+            INSERT INTO users (name, email, password_hash, role, phone, status)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            RETURNING id, name, email, role, phone
+        `;
+        console.log('Create user insert query:', insertQuery.trim(), 'params:', [
+            name,
+            email,
+            hashedPassword,
+            role || 'collector',
+            phone || null,
+            'active'
+        ]);
+        const insertResult = await db.query(insertQuery, [
+            name,
+            email,
+            hashedPassword,
+            role || 'collector',
+            phone || null,
+            'active'
+        ]);
+        const newUser = insertResult.rows[0];
+
+        console.log('User created successfully, sending response...', newUser);
 
         res.status(201).json({
             success: true,
             message: 'User created successfully',
-            data: {
-                id: result.insertId,
-                name,
-                email,
-                role: role || 'collector',
-                phone
-            }
+            data: newUser
         });
 
     } catch (error) {
