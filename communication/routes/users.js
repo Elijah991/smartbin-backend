@@ -59,20 +59,16 @@ router.get('/', authenticateToken, authorizeRole('admin'), async (req, res) => {
 // Get single user by ID (Admin only)
 router.get('/:id', authenticateToken, authorizeRole('admin'), async (req, res) => {
     try {
-        const [users] = await db.query(
-            `SELECT u.id, u.name, u.email, u.role, u.phone, u.status, 
-                    u.created_at, u.last_login,
-                    COUNT(DISTINCT b.id) as assigned_bins,
-                    COUNT(DISTINCT c.id) as total_collections
-             FROM users u
-             LEFT JOIN bins b ON u.id = b.assigned_to
-             LEFT JOIN collections c ON u.id = c.collector_id
-             WHERE u.id = ?
-             GROUP BY u.id`,
-            [req.params.id]
+        const userId = req.params.id;
+
+        const result = await db.query(
+            `SELECT id, name, email, role, phone, status, created_at, last_login
+             FROM users
+             WHERE id = $1`,
+            [userId]
         );
 
-        if (users.length === 0) {
+        if (!result.rows || result.rows.length === 0) {
             return res.status(404).json({ 
                 success: false, 
                 message: 'User not found' 
@@ -81,7 +77,7 @@ router.get('/:id', authenticateToken, authorizeRole('admin'), async (req, res) =
 
         res.json({
             success: true,
-            data: users[0]
+            data: result.rows[0]
         });
 
     } catch (error) {
