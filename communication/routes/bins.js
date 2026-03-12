@@ -239,7 +239,14 @@ router.put('/:id', authenticateToken, authorizeRole('admin'), async (req, res) =
 
         const updateQuery = `UPDATE bins SET ${updates.join(', ')} WHERE id = $${idParamIndex}`;
         console.log('Update bin query:', updateQuery, 'params:', params);
-        await db.query(updateQuery, params);
+        const updateResult = await db.query(updateQuery, params);
+
+        if (!updateResult || updateResult.rowCount === 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Bin not updated'
+            });
+        }
 
         // If assignment changed, notify the new collector
         const currentBin = currentBinRows[0];
@@ -449,7 +456,14 @@ router.post('/:id/collect', authenticateToken, async (req, res) => {
             WHERE id = $1
         `;
         console.log('Collect bin update bin query:', updateBinQuery.trim(), 'params:', [binId]);
-        await db.query(updateBinQuery, [binId]);
+        const updateResult = await db.query(updateBinQuery, [binId]);
+
+        if (!updateResult || updateResult.rowCount === 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Bin status could not be updated'
+            });
+        }
 
         // Create success notification
         const notificationQuery = `
@@ -514,7 +528,14 @@ router.delete('/:id', authenticateToken, authorizeRole('admin'), async (req, res
 
         const deleteQuery = 'DELETE FROM bins WHERE id = $1';
         console.log('Delete bin query:', deleteQuery, 'params:', [binId]);
-        await db.query(deleteQuery, [binId]);
+        const deleteResult = await db.query(deleteQuery, [binId]);
+
+        if (!deleteResult || deleteResult.rowCount === 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Bin could not be deleted'
+            });
+        }
 
         res.json({
             success: true,
@@ -523,6 +544,14 @@ router.delete('/:id', authenticateToken, authorizeRole('admin'), async (req, res
 
     } catch (error) {
         console.error('Delete bin error:', error);
+
+        if (error.code === '23503') {
+            return res.status(400).json({
+                success: false,
+                message: 'Cannot delete bin because there are related records (e.g. collections)'
+            });
+        }
+
         res.status(500).json({ 
             success: false, 
             message: 'Server error' 

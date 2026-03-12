@@ -209,7 +209,14 @@ const updateUserHandler = async (req, res) => {
 
         const updateQuery = `UPDATE users SET ${updates.join(', ')} WHERE id = $${idParamIndex}`;
         console.log('Update user query:', updateQuery, 'params:', params);
-        await db.query(updateQuery, params);
+        const result = await db.query(updateQuery, params);
+
+        if (!result || result.rowCount === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'User not found or not updated'
+            });
+        }
 
         res.json({
             success: true,
@@ -255,7 +262,14 @@ router.post('/:id/reset-password', authenticateToken, authorizeRole('admin'), as
         // Update password
         const resetQuery = 'UPDATE users SET password_hash = $1 WHERE id = $2';
         console.log('Reset password query:', resetQuery, 'params:', [hashedPassword, userId]);
-        await db.query(resetQuery, [hashedPassword, userId]);
+        const result = await db.query(resetQuery, [hashedPassword, userId]);
+
+        if (!result || result.rowCount === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'User not found or password not updated'
+            });
+        }
 
         res.json({
             success: true,
@@ -300,7 +314,14 @@ router.delete('/:id', authenticateToken, authorizeRole('admin'), async (req, res
         // Delete user (cascades to related records)
         const deleteQuery = 'DELETE FROM users WHERE id = $1';
         console.log('Delete user query:', deleteQuery, 'params:', [userId]);
-        await db.query(deleteQuery, [userId]);
+        const deleteResult = await db.query(deleteQuery, [userId]);
+
+        if (!deleteResult || deleteResult.rowCount === 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'User could not be deleted'
+            });
+        }
 
         res.json({
             success: true,
@@ -309,8 +330,16 @@ router.delete('/:id', authenticateToken, authorizeRole('admin'), async (req, res
 
     } catch (error) {
         console.error('Delete user error:', error);
+
+        if (error.code === '23503') {
+            return res.status(400).json({
+                success: false,
+                message: 'Cannot delete user because there are related records (e.g. bins or collections)'
+            });
+        }
+
         res.status(500).json({ 
-            success: false, 
+            success: false,
             message: 'Server error' 
         });
     }
