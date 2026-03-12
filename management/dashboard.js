@@ -7,83 +7,99 @@ const router = express.Router();
 router.get('/admin', authenticateToken, authorizeRole('admin'), async (req, res) => {
     try {
         // Total bins
-        const [totalBins] = await db.query('SELECT COUNT(*) as count FROM bins');
+        const totalBinsResult = await db.query('SELECT COUNT(*) AS count FROM bins');
+        const totalBinsRow = totalBinsResult.rows[0] || { count: 0 };
         
         // Critical bins
-        const [criticalBins] = await db.query(
-            'SELECT COUNT(*) as count FROM bins WHERE status = "critical"'
+        const criticalBinsResult = await db.query(
+            "SELECT COUNT(*) AS count FROM bins WHERE status = 'critical'"
         );
+        const criticalBinsRow = criticalBinsResult.rows[0] || { count: 0 };
         
         // Warning bins
-        const [warningBins] = await db.query(
-            'SELECT COUNT(*) as count FROM bins WHERE status = "warning"'
+        const warningBinsResult = await db.query(
+            "SELECT COUNT(*) AS count FROM bins WHERE status = 'warning'"
         );
+        const warningBinsRow = warningBinsResult.rows[0] || { count: 0 };
         
         // Total collectors
-        const [totalCollectors] = await db.query(
-            'SELECT COUNT(*) as count FROM users WHERE role = "collector"'
+        const totalCollectorsResult = await db.query(
+            "SELECT COUNT(*) AS count FROM users WHERE role = 'collector'"
         );
+        const totalCollectorsRow = totalCollectorsResult.rows[0] || { count: 0 };
         
         // Active collectors
-        const [activeCollectors] = await db.query(
-            'SELECT COUNT(*) as count FROM users WHERE role = "collector" AND status = "active"'
+        const activeCollectorsResult = await db.query(
+            "SELECT COUNT(*) AS count FROM users WHERE role = 'collector' AND status = 'active'"
         );
+        const activeCollectorsRow = activeCollectorsResult.rows[0] || { count: 0 };
         
         // Today's collections
-        const [todayCollections] = await db.query(
-            'SELECT COUNT(*) as count FROM collections WHERE DATE(collection_time) = CURDATE()'
+        const todayCollectionsResult = await db.query(
+            'SELECT COUNT(*) AS count FROM collections WHERE collection_time::date = CURRENT_DATE'
         );
+        const todayCollectionsRow = todayCollectionsResult.rows[0] || { count: 0 };
         
         // This week's collections
-        const [weekCollections] = await db.query(
-            'SELECT COUNT(*) as count FROM collections WHERE YEARWEEK(collection_time) = YEARWEEK(NOW())'
+        const weekCollectionsResult = await db.query(
+            "SELECT COUNT(*) AS count FROM collections WHERE date_trunc('week', collection_time) = date_trunc('week', NOW())"
         );
+        const weekCollectionsRow = weekCollectionsResult.rows[0] || { count: 0 };
         
         // Average fill level
-        const [avgFillLevel] = await db.query(
-            'SELECT AVG(fill_level) as avg_level FROM bins'
+        const avgFillLevelResult = await db.query(
+            'SELECT AVG(fill_level) AS avg_level FROM bins'
         );
+        const avgFillLevelRow = avgFillLevelResult.rows[0] || { avg_level: 0 };
 
         // Collections per day (last 7 days)
-        const [dailyCollections] = await db.query(`
-            SELECT DATE(collection_time) as date, COUNT(*) as count
+        const dailyCollectionsResult = await db.query(`
+            SELECT DATE(collection_time) AS date, COUNT(*) AS count
             FROM collections
-            WHERE collection_time >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+            WHERE collection_time >= NOW() - INTERVAL '7 days'
             GROUP BY DATE(collection_time)
             ORDER BY date ASC
         `);
+        const dailyCollections = Array.isArray(dailyCollectionsResult.rows)
+            ? dailyCollectionsResult.rows
+            : [];
 
         // Top collectors (this month)
-        const [topCollectors] = await db.query(`
-            SELECT u.name, u.id, COUNT(c.id) as collections
+        const topCollectorsResult = await db.query(`
+            SELECT u.name, u.id, COUNT(c.id) AS collections
             FROM users u
             JOIN collections c ON u.id = c.collector_id
-            WHERE MONTH(c.collection_time) = MONTH(NOW())
-            AND YEAR(c.collection_time) = YEAR(NOW())
+            WHERE date_trunc('month', c.collection_time) = date_trunc('month', NOW())
             GROUP BY u.id
             ORDER BY collections DESC
             LIMIT 5
         `);
+        const topCollectors = Array.isArray(topCollectorsResult.rows)
+            ? topCollectorsResult.rows
+            : [];
 
         // Bins by status
-        const [binsByStatus] = await db.query(`
-            SELECT status, COUNT(*) as count
+        const binsByStatusResult = await db.query(`
+            SELECT status, COUNT(*) AS count
             FROM bins
             GROUP BY status
         `);
+        const binsByStatus = Array.isArray(binsByStatusResult.rows)
+            ? binsByStatusResult.rows
+            : [];
 
         const overviewObj = {
-            total_bins: totalBins[0].count,
-            critical_bins: criticalBins[0].count,
-            warning_bins: warningBins[0].count,
-            total_collectors: totalCollectors[0].count,
-            active_collectors: activeCollectors[0].count,
-            today_collections: todayCollections[0].count,
-            week_collections: weekCollections[0].count,
-            avg_fill_level: Math.round(avgFillLevel[0].avg_level || 0)
+            total_bins: Number(totalBinsRow.count || 0),
+            critical_bins: Number(criticalBinsRow.count || 0),
+            warning_bins: Number(warningBinsRow.count || 0),
+            total_collectors: Number(totalCollectorsRow.count || 0),
+            active_collectors: Number(activeCollectorsRow.count || 0),
+            today_collections: Number(todayCollectionsRow.count || 0),
+            week_collections: Number(weekCollectionsRow.count || 0),
+            avg_fill_level: Math.round(Number(avgFillLevelRow.avg_level || 0))
         };
 
-        res.json({
+        res.status(200).json({
             success: true,
             data: {
                 // Top-level stats for clients expecting direct keys
