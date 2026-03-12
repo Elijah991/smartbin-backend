@@ -167,8 +167,7 @@ router.post('/', authenticateToken, authorizeRole('admin'), async (req, res) => 
     }
 });
 
-// Update user (Admin only)
-router.put('/:id', authenticateToken, authorizeRole('admin'), async (req, res) => {
+const updateUserHandler = async (req, res) => {
     try {
         const { name, email, phone, role, status } = req.body;
         const userId = req.params.id;
@@ -178,24 +177,24 @@ router.put('/:id', authenticateToken, authorizeRole('admin'), async (req, res) =
         const params = [];
 
         if (name) {
-            updates.push('name = ?');
             params.push(name);
+            updates.push(`name = $${params.length}`);
         }
         if (email) {
-            updates.push('email = ?');
             params.push(email);
+            updates.push(`email = $${params.length}`);
         }
         if (phone !== undefined) {
-            updates.push('phone = ?');
             params.push(phone);
+            updates.push(`phone = $${params.length}`);
         }
         if (role) {
-            updates.push('role = ?');
             params.push(role);
+            updates.push(`role = $${params.length}`);
         }
         if (status) {
-            updates.push('status = ?');
             params.push(status);
+            updates.push(`status = $${params.length}`);
         }
 
         if (updates.length === 0) {
@@ -206,11 +205,11 @@ router.put('/:id', authenticateToken, authorizeRole('admin'), async (req, res) =
         }
 
         params.push(userId);
+        const idParamIndex = params.length;
 
-        await db.query(
-            `UPDATE users SET ${updates.join(', ')} WHERE id = ?`,
-            params
-        );
+        const updateQuery = `UPDATE users SET ${updates.join(', ')} WHERE id = $${idParamIndex}`;
+        console.log('Update user query:', updateQuery, 'params:', params);
+        await db.query(updateQuery, params);
 
         res.json({
             success: true,
@@ -224,7 +223,11 @@ router.put('/:id', authenticateToken, authorizeRole('admin'), async (req, res) =
             message: 'Server error' 
         });
     }
-});
+};
+
+// Update user (Admin only) - PUT (full) and PATCH (partial/status)
+router.put('/:id', authenticateToken, authorizeRole('admin'), updateUserHandler);
+router.patch('/:id', authenticateToken, authorizeRole('admin'), updateUserHandler);
 
 // Reset user password (Admin only)
 router.post('/:id/reset-password', authenticateToken, authorizeRole('admin'), async (req, res) => {
@@ -250,10 +253,9 @@ router.post('/:id/reset-password', authenticateToken, authorizeRole('admin'), as
         const hashedPassword = await bcrypt.hash(newPassword, 10);
 
         // Update password
-        await db.query(
-            'UPDATE users SET password_hash = ? WHERE id = ?',
-            [hashedPassword, userId]
-        );
+        const resetQuery = 'UPDATE users SET password_hash = $1 WHERE id = $2';
+        console.log('Reset password query:', resetQuery, 'params:', [hashedPassword, userId]);
+        await db.query(resetQuery, [hashedPassword, userId]);
 
         res.json({
             success: true,
@@ -275,7 +277,10 @@ router.delete('/:id', authenticateToken, authorizeRole('admin'), async (req, res
         const userId = req.params.id;
 
         // Check if user exists
-        const [users] = await db.query('SELECT id FROM users WHERE id = ?', [userId]);
+        const checkQuery = 'SELECT id FROM users WHERE id = $1';
+        console.log('Delete user check query:', checkQuery, 'params:', [userId]);
+        const usersResult = await db.query(checkQuery, [userId]);
+        const users = usersResult.rows || [];
 
         if (users.length === 0) {
             return res.status(404).json({ 
@@ -285,7 +290,7 @@ router.delete('/:id', authenticateToken, authorizeRole('admin'), async (req, res
         }
 
         // Prevent admin from deleting themselves
-        if (parseInt(userId) === req.user.id) {
+        if (parseInt(userId, 10) === req.user.id) {
             return res.status(400).json({ 
                 success: false, 
                 message: 'Cannot delete your own account' 
@@ -293,7 +298,9 @@ router.delete('/:id', authenticateToken, authorizeRole('admin'), async (req, res
         }
 
         // Delete user (cascades to related records)
-        await db.query('DELETE FROM users WHERE id = ?', [userId]);
+        const deleteQuery = 'DELETE FROM users WHERE id = $1';
+        console.log('Delete user query:', deleteQuery, 'params:', [userId]);
+        await db.query(deleteQuery, [userId]);
 
         res.json({
             success: true,
@@ -315,22 +322,26 @@ router.get('/:id/collections', authenticateToken, async (req, res) => {
         const userId = req.params.id;
 
         // Admin can view any user's history, collectors can only view their own
-        if (req.user.role !== 'admin' && parseInt(userId) !== req.user.id) {
+        if (req.user.role !== 'admin' && parseInt(userId, 10) !== req.user.id) {
             return res.status(403).json({ 
                 success: false, 
                 message: 'Access denied' 
             });
         }
 
-        const [collections] = await db.query(
-            `SELECT c.*, b.bin_code, b.location
-             FROM collections c
-             JOIN bins b ON c.bin_id = b.id
-             WHERE c.collector_id = ?
-             ORDER BY c.collection_time DESC
-             LIMIT 50`,
-            [userId]
-        );
+        const historyQuery = `
+            SELECT c.*, b.bin_code, b.location
+            FROM collections c
+            JOIN bins b ON c.bin_id = b.id
+            WHERE c.collector_id = $1
+            ORDER BY c.collection_time DESC
+            LIMIT 50
+        `;
+        console.log('Get user collections query:', historyQuery.trim(), 'params:', [userId]);
+        const collectionsResult = await db.query(historyQuery, [userId]);
+        const collections = Array.isArray(collectionsResult.rows)
+            ? collectionsResult.rows
+            : [];
 
         res.json({
             success: true,

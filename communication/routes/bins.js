@@ -56,21 +56,25 @@ router.get('/', authenticateToken, async (req, res) => {
 // Get single bin by ID
 router.get('/:id', authenticateToken, async (req, res) => {
     try {
+        const binId = req.params.id;
+
         let query = `
-            SELECT b.*, u.name as collector_name, u.email as collector_email
+            SELECT b.*, u.name AS collector_name, u.email AS collector_email
             FROM bins b
             LEFT JOIN users u ON b.assigned_to = u.id
-            WHERE b.id = ?
+            WHERE b.id = $1
         `;
-        const params = [req.params.id];
+        const params = [binId];
 
         // If user is a collector, ensure they can only access their assigned bins
         if (req.user.role === 'collector') {
-            query += ' AND b.assigned_to = ?';
+            query += ' AND b.assigned_to = $2';
             params.push(req.user.id);
         }
 
-        const [bins] = await db.query(query, params);
+        console.log('Get bin by id query:', query.trim(), 'params:', params);
+        const result = await db.query(query, params);
+        const bins = Array.isArray(result.rows) ? result.rows : [];
 
         if (bins.length === 0) {
             return res.status(404).json({ 
@@ -184,9 +188,10 @@ router.put('/:id', authenticateToken, authorizeRole('admin'), async (req, res) =
         const binId = req.params.id;
 
         // Get current bin data
-        const [currentBin] = await db.query('SELECT * FROM bins WHERE id = ?', [binId]);
+        const currentBinResult = await db.query('SELECT * FROM bins WHERE id = $1', [binId]);
+        const currentBinRows = currentBinResult.rows || [];
         
-        if (currentBin.length === 0) {
+        if (currentBinRows.length === 0) {
             return res.status(404).json({ 
                 success: false, 
                 message: 'Bin not found' 
@@ -198,28 +203,28 @@ router.put('/:id', authenticateToken, authorizeRole('admin'), async (req, res) =
         const params = [];
 
         if (location) {
-            updates.push('location = ?');
             params.push(location);
+            updates.push(`location = $${params.length}`);
         }
         if (latitude !== undefined) {
-            updates.push('latitude = ?');
             params.push(latitude);
+            updates.push(`latitude = $${params.length}`);
         }
         if (longitude !== undefined) {
-            updates.push('longitude = ?');
             params.push(longitude);
+            updates.push(`longitude = $${params.length}`);
         }
         if (capacity) {
-            updates.push('capacity = ?');
             params.push(capacity);
+            updates.push(`capacity = $${params.length}`);
         }
         if (assigned_to !== undefined) {
-            updates.push('assigned_to = ?');
             params.push(assigned_to);
+            updates.push(`assigned_to = $${params.length}`);
         }
         if (status) {
-            updates.push('status = ?');
             params.push(status);
+            updates.push(`status = $${params.length}`);
         }
 
         if (updates.length === 0) {
@@ -230,28 +235,31 @@ router.put('/:id', authenticateToken, authorizeRole('admin'), async (req, res) =
         }
 
         params.push(binId);
+        const idParamIndex = params.length;
 
-        await db.query(
-            `UPDATE bins SET ${updates.join(', ')} WHERE id = ?`,
-            params
-        );
+        const updateQuery = `UPDATE bins SET ${updates.join(', ')} WHERE id = $${idParamIndex}`;
+        console.log('Update bin query:', updateQuery, 'params:', params);
+        await db.query(updateQuery, params);
 
         // If assignment changed, notify the new collector
-        if (assigned_to !== undefined && assigned_to !== currentBin[0].assigned_to) {
+        const currentBin = currentBinRows[0];
+        if (assigned_to !== undefined && assigned_to !== currentBin.assigned_to) {
             if (assigned_to) {
                 await db.query(
                     `INSERT INTO notifications (user_id, bin_id, type, title, message) 
-                     VALUES (?, ?, 'info', 'Bin Assigned', ?)`,
-                    [assigned_to, binId, `Bin ${currentBin[0].bin_code} has been assigned to you`]
+                     VALUES ($1, $2, 'info', 'Bin Assigned', $3)`,
+                    [assigned_to, binId, `Bin ${currentBin.bin_code} has been assigned to you`]
                 );
 
-                mqttService.publishNotification(assigned_to, {
-                    type: 'info',
-                    title: 'Bin Assigned',
-                    message: `Bin ${currentBin[0].bin_code} has been assigned to you`,
-                    bin_id: binId,
-                    timestamp: new Date()
-                });
+                if (typeof mqttService !== 'undefined' && mqttService.publishNotification) {
+                    mqttService.publishNotification(assigned_to, {
+                        type: 'info',
+                        title: 'Bin Assigned',
+                        message: `Bin ${currentBin.bin_code} has been assigned to you`,
+                        bin_id: binId,
+                        timestamp: new Date()
+                    });
+                }
             }
         }
 
@@ -387,11 +395,21 @@ router.patch('/:id/level', async (req, res) => {
 // Mark bin as collected
 router.post('/:id/collect', authenticateToken, async (req, res) => {
     try {
-        const binId = req.params.id;
+        const binId = req.body.id || req.params.id;
         const { notes } = req.body;
 
+        if (!binId) {
+            return res.status(400).json({
+                success: false,
+                message: 'binId is required'
+            });
+        }
+
         // Get bin details
-        const [bins] = await db.query('SELECT * FROM bins WHERE id = ?', [binId]);
+        const binQuery = 'SELECT * FROM bins WHERE id = $1';
+        console.log('Collect bin get query:', binQuery, 'params:', [binId]);
+        const binsResult = await db.query(binQuery, [binId]);
+        const bins = binsResult.rows || [];
         
         if (bins.length === 0) {
             return res.status(404).json({ 
@@ -413,32 +431,51 @@ router.post('/:id/collect', authenticateToken, async (req, res) => {
         const fillLevelBefore = bin.fill_level;
 
         // Record collection
-        await db.query(
-            `INSERT INTO collections (bin_id, collector_id, fill_level_before, fill_level_after, notes) 
-             VALUES (?, ?, ?, 0, ?)`,
-            [binId, req.user.id, fillLevelBefore, notes || null]
-        );
+        const insertCollectionQuery = `
+            INSERT INTO collections (bin_id, collector_id, fill_level_before, fill_level_after, notes) 
+            VALUES ($1, $2, $3, 0, $4)
+        `;
+        console.log('Collect bin insert collection query:', insertCollectionQuery.trim(), 'params:', [
+            binId, req.user.id, fillLevelBefore, notes || null
+        ]);
+        await db.query(insertCollectionQuery, [
+            binId, req.user.id, fillLevelBefore, notes || null
+        ]);
 
         // Update bin status
-        await db.query(
-            `UPDATE bins SET fill_level = 0, status = 'normal', last_collection = NOW() WHERE id = ?`,
-            [binId]
-        );
+        const updateBinQuery = `
+            UPDATE bins
+            SET fill_level = 0, status = 'normal', last_collection = NOW()
+            WHERE id = $1
+        `;
+        console.log('Collect bin update bin query:', updateBinQuery.trim(), 'params:', [binId]);
+        await db.query(updateBinQuery, [binId]);
 
         // Create success notification
-        await db.query(
-            `INSERT INTO notifications (user_id, bin_id, type, title, message) 
-             VALUES (?, ?, 'success', 'Collection Completed', ?)`,
-            [req.user.id, binId, `You successfully collected bin ${bin.bin_code}`]
-        );
+        const notificationQuery = `
+            INSERT INTO notifications (user_id, bin_id, type, title, message) 
+            VALUES ($1, $2, 'success', 'Collection Completed', $3)
+        `;
+        console.log('Collect bin notification query:', notificationQuery.trim(), 'params:', [
+            req.user.id, binId, `You successfully collected bin ${bin.bin_code}`
+        ]);
+        await db.query(notificationQuery, [
+            req.user.id, binId, `You successfully collected bin ${bin.bin_code}`
+        ]);
 
         // Publish to MQTT
-        mqttService.publishBinLevel(bin.bin_code, 0);
-        mqttService.publishBinStatus(bin.bin_code, { 
-            status: 'normal', 
-            fill_level: 0,
-            last_collection: new Date()
-        });
+        if (typeof mqttService !== 'undefined') {
+            if (mqttService.publishBinLevel) {
+                mqttService.publishBinLevel(bin.bin_code, 0);
+            }
+            if (mqttService.publishBinStatus) {
+                mqttService.publishBinStatus(bin.bin_code, { 
+                    status: 'normal', 
+                    fill_level: 0,
+                    last_collection: new Date()
+                });
+            }
+        }
 
         res.json({
             success: true,
@@ -463,7 +500,10 @@ router.delete('/:id', authenticateToken, authorizeRole('admin'), async (req, res
     try {
         const binId = req.params.id;
 
-        const [bins] = await db.query('SELECT id FROM bins WHERE id = ?', [binId]);
+        const checkQuery = 'SELECT id FROM bins WHERE id = $1';
+        console.log('Delete bin check query:', checkQuery, 'params:', [binId]);
+        const binsResult = await db.query(checkQuery, [binId]);
+        const bins = binsResult.rows || [];
 
         if (bins.length === 0) {
             return res.status(404).json({ 
@@ -472,7 +512,9 @@ router.delete('/:id', authenticateToken, authorizeRole('admin'), async (req, res
             });
         }
 
-        await db.query('DELETE FROM bins WHERE id = ?', [binId]);
+        const deleteQuery = 'DELETE FROM bins WHERE id = $1';
+        console.log('Delete bin query:', deleteQuery, 'params:', [binId]);
+        await db.query(deleteQuery, [binId]);
 
         res.json({
             success: true,
@@ -493,15 +535,19 @@ router.get('/:id/history', authenticateToken, async (req, res) => {
     try {
         const binId = req.params.id;
 
-        const [collections] = await db.query(
-            `SELECT c.*, u.name as collector_name
-             FROM collections c
-             JOIN users u ON c.collector_id = u.id
-             WHERE c.bin_id = ?
-             ORDER BY c.collection_time DESC
-             LIMIT 50`,
-            [binId]
-        );
+        const historyQuery = `
+            SELECT c.*, u.name AS collector_name
+            FROM collections c
+            JOIN users u ON c.collector_id = u.id
+            WHERE c.bin_id = $1
+            ORDER BY c.collection_time DESC
+            LIMIT 50
+        `;
+        console.log('Get bin history query:', historyQuery.trim(), 'params:', [binId]);
+        const collectionsResult = await db.query(historyQuery, [binId]);
+        const collections = Array.isArray(collectionsResult.rows)
+            ? collectionsResult.rows
+            : [];
 
         res.json({
             success: true,
