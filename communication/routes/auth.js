@@ -10,6 +10,8 @@ router.post('/login', async (req, res) => {
     try {
         const { email, password } = req.body;
 
+        console.log('Email received:', email);
+
         if (!email || !password) {
             return res.status(400).json({ 
                 success: false, 
@@ -17,9 +19,9 @@ router.post('/login', async (req, res) => {
             });
         }
 
-        // Find user by email
-        const [users] = await db.query(
-            'SELECT * FROM users WHERE email = ?',
+        // Find user by email (PostgreSQL syntax)
+        const { rows: users } = await db.query(
+            'SELECT * FROM users WHERE email = $1',
             [email]
         );
 
@@ -50,9 +52,9 @@ router.post('/login', async (req, res) => {
             });
         }
 
-        // Update last login
+        // Update last login (PostgreSQL syntax)
         await db.query(
-            'UPDATE users SET last_login = NOW() WHERE id = ?',
+            'UPDATE users SET last_login = NOW() WHERE id = $1',
             [user.id]
         );
 
