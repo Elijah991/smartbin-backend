@@ -12,28 +12,35 @@ router.get('/', authenticateToken, authorizeRole('admin'), async (req, res) => {
         let query = `
             SELECT u.id, u.name, u.email, u.role, u.phone, u.status, 
                    u.created_at, u.last_login,
-                   COUNT(DISTINCT b.id) as assigned_bins,
-                   COUNT(DISTINCT c.id) as total_collections
+                   COUNT(DISTINCT b.id) AS assigned_bins,
+                   COUNT(DISTINCT c.id) AS total_collections
             FROM users u
             LEFT JOIN bins b ON u.id = b.assigned_to
             LEFT JOIN collections c ON u.id = c.collector_id
             WHERE 1=1
         `;
         const params = [];
+        let paramIndex = 1;
 
         if (role) {
-            query += ' AND u.role = ?';
+            query += ` AND u.role = $${paramIndex++}`;
             params.push(role);
         }
 
         if (status) {
-            query += ' AND u.status = ?';
+            query += ` AND u.status = $${paramIndex++}`;
             params.push(status);
         }
 
-        query += ' GROUP BY u.id ORDER BY u.created_at DESC';
+        query += `
+            GROUP BY 
+                u.id, u.name, u.email, u.role, u.phone, u.status, 
+                u.created_at, u.last_login
+            ORDER BY u.created_at DESC
+        `;
 
-        const [users] = await db.query(query, params);
+        const result = await db.query(query, params);
+        const users = Array.isArray(result.rows) ? result.rows : [];
 
         res.json({
             success: true,

@@ -10,32 +10,34 @@ router.get('/', authenticateToken, async (req, res) => {
         const { status, assigned_to } = req.query;
         
         let query = `
-            SELECT b.*, u.name as collector_name, u.email as collector_email
+            SELECT b.*, u.name AS collector_name, u.email AS collector_email
             FROM bins b
             LEFT JOIN users u ON b.assigned_to = u.id
             WHERE 1=1
         `;
         const params = [];
+        let paramIndex = 1;
 
         if (status) {
-            query += ' AND b.status = ?';
+            query += ` AND b.status = $${paramIndex++}`;
             params.push(status);
         }
 
         if (assigned_to) {
-            query += ' AND b.assigned_to = ?';
+            query += ` AND b.assigned_to = $${paramIndex++}`;
             params.push(assigned_to);
         }
 
         // If user is a collector, only show their assigned bins
         if (req.user.role === 'collector') {
-            query += ' AND b.assigned_to = ?';
+            query += ` AND b.assigned_to = $${paramIndex++}`;
             params.push(req.user.id);
         }
 
         query += ' ORDER BY b.fill_level DESC, b.bin_code ASC';
 
-        const [bins] = await db.query(query, params);
+        const result = await db.query(query, params);
+        const bins = Array.isArray(result.rows) ? result.rows : [];
 
         res.json({
             success: true,
@@ -105,10 +107,11 @@ router.post('/', authenticateToken, authorizeRole('admin'), async (req, res) => 
         }
 
         // Check if bin code already exists
-        const [existingBins] = await db.query(
-            'SELECT id FROM bins WHERE bin_code = ?',
+        const existingBinsResult = await db.query(
+            'SELECT id FROM bins WHERE bin_code = $1',
             [bin_code]
         );
+        const existingBins = existingBinsResult.rows || [];
 
         if (existingBins.length > 0) {
             return res.status(409).json({ 
@@ -118,9 +121,10 @@ router.post('/', authenticateToken, authorizeRole('admin'), async (req, res) => 
         }
 
         // Insert bin
-        const [result] = await db.query(
+        const insertResult = await db.query(
             `INSERT INTO bins (bin_code, location, latitude, longitude, capacity, assigned_to, status) 
-             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+             VALUES ($1, $2, $3, $4, $5, $6, $7)
+             RETURNING id`,
             [
                 bin_code, 
                 location, 
@@ -131,30 +135,34 @@ router.post('/', authenticateToken, authorizeRole('admin'), async (req, res) => 
                 'normal'
             ]
         );
+        const newBin = insertResult.rows[0] || { id: null };
+        const newBinId = newBin.id;
 
         // Create notification for assigned collector
-        if (assigned_to) {
+        if (assigned_to && newBinId) {
             await db.query(
                 `INSERT INTO notifications (user_id, bin_id, type, title, message) 
-                 VALUES (?, ?, 'info', 'New Bin Assigned', ?)`,
-                [assigned_to, result.insertId, `Bin ${bin_code} has been assigned to you at ${location}`]
+                 VALUES ($1, $2, 'info', 'New Bin Assigned', $3)`,
+                [assigned_to, newBinId, `Bin ${bin_code} has been assigned to you at ${location}`]
             );
 
             // Send MQTT notification
-            mqttService.publishNotification(assigned_to, {
-                type: 'info',
-                title: 'New Bin Assigned',
-                message: `Bin ${bin_code} has been assigned to you at ${location}`,
-                bin_id: result.insertId,
-                timestamp: new Date()
-            });
+            if (typeof mqttService !== 'undefined' && mqttService.publishNotification) {
+                mqttService.publishNotification(assigned_to, {
+                    type: 'info',
+                    title: 'New Bin Assigned',
+                    message: `Bin ${bin_code} has been assigned to you at ${location}`,
+                    bin_id: newBinId,
+                    timestamp: new Date()
+                });
+            }
         }
 
         res.status(201).json({
             success: true,
             message: 'Bin created successfully',
             data: {
-                id: result.insertId,
+                id: newBinId,
                 bin_code,
                 location
             }
