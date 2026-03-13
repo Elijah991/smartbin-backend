@@ -56,6 +56,32 @@ router.get('/', authenticateToken, authorizeRole('admin'), async (req, res) => {
     }
 });
 
+// Get collectors only (Admin only) - simplified list for dropdowns
+router.get('/collectors', authenticateToken, authorizeRole('admin'), async (req, res) => {
+    try {
+        const result = await db.query(
+            `SELECT id, name 
+             FROM users 
+             WHERE role = $1 AND status = $2
+             ORDER BY name ASC`,
+            ['collector', 'active']
+        );
+
+        const collectors = Array.isArray(result.rows) ? result.rows : [];
+
+        res.json({
+            success: true,
+            data: collectors
+        });
+    } catch (error) {
+        console.error('Get collectors error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Server error'
+        });
+    }
+});
+
 // Get single user by ID (Admin only)
 router.get('/:id', authenticateToken, authorizeRole('admin'), async (req, res) => {
     try {
