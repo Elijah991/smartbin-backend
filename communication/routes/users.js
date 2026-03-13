@@ -176,6 +176,16 @@ const updateUserHandler = async (req, res) => {
         const updates = [];
         const params = [];
 
+        if (status !== undefined && status !== null) {
+            const allowedStatuses = new Set(['active', 'inactive']);
+            if (!allowedStatuses.has(status)) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid status. Allowed values are 'active' or 'inactive'"
+                });
+            }
+        }
+
         if (name) {
             params.push(name);
             updates.push(`name = $${params.length}`);
@@ -192,7 +202,7 @@ const updateUserHandler = async (req, res) => {
             params.push(role);
             updates.push(`role = $${params.length}`);
         }
-        if (status) {
+        if (status !== undefined) {
             params.push(status);
             updates.push(`status = $${params.length}`);
         }
@@ -290,21 +300,8 @@ router.delete('/:id', authenticateToken, authorizeRole('admin'), async (req, res
     try {
         const userId = req.params.id;
 
-        // Check if user exists
-        const checkQuery = 'SELECT id FROM users WHERE id = $1';
-        console.log('Delete user check query:', checkQuery, 'params:', [userId]);
-        const usersResult = await db.query(checkQuery, [userId]);
-        const users = usersResult.rows || [];
-
-        if (users.length === 0) {
-            return res.status(404).json({ 
-                success: false, 
-                message: 'User not found' 
-            });
-        }
-
         // Prevent admin from deleting themselves
-        if (parseInt(userId, 10) === req.user.id) {
+        if (Number(userId) === Number(req.user.id)) {
             return res.status(400).json({ 
                 success: false, 
                 message: 'Cannot delete your own account' 
@@ -317,9 +314,9 @@ router.delete('/:id', authenticateToken, authorizeRole('admin'), async (req, res
         const deleteResult = await db.query(deleteQuery, [userId]);
 
         if (!deleteResult || deleteResult.rowCount === 0) {
-            return res.status(400).json({
+            return res.status(404).json({
                 success: false,
-                message: 'User could not be deleted'
+                message: 'User not found'
             });
         }
 

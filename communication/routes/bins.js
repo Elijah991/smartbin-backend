@@ -4,6 +4,12 @@ const db = require('../../config/database');
 const { authenticateToken, authorizeRole } = require('../middleware/auth');
 const router = express.Router();
 
+const canUseMqtt = () =>
+    (typeof mqttService !== 'undefined') && mqttService &&
+    (typeof mqttService.publishNotification === 'function' ||
+        typeof mqttService.publishBinLevel === 'function' ||
+        typeof mqttService.publishBinStatus === 'function');
+
 // Get all bins
 router.get('/', authenticateToken, async (req, res) => {
     try {
@@ -242,9 +248,9 @@ router.put('/:id', authenticateToken, authorizeRole('admin'), async (req, res) =
         const updateResult = await db.query(updateQuery, params);
 
         if (!updateResult || updateResult.rowCount === 0) {
-            return res.status(400).json({
+            return res.status(404).json({
                 success: false,
-                message: 'Bin not updated'
+                message: 'Bin not found'
             });
         }
 
@@ -258,7 +264,7 @@ router.put('/:id', authenticateToken, authorizeRole('admin'), async (req, res) =
                     [assigned_to, binId, `Bin ${currentBin.bin_code} has been assigned to you`]
                 );
 
-                if (typeof mqttService !== 'undefined' && mqttService.publishNotification) {
+                if (typeof mqttService !== 'undefined' && mqttService && mqttService.publishNotification) {
                     mqttService.publishNotification(assigned_to, {
                         type: 'info',
                         title: 'Bin Assigned',
@@ -298,8 +304,9 @@ router.patch('/:id/level', async (req, res) => {
         }
 
         // Get current bin
-        const [bins] = await db.query('SELECT * FROM bins WHERE id = ?', [binId]);
-        
+        const binResult = await db.query('SELECT * FROM bins WHERE id = $1', [binId]);
+        const bins = Array.isArray(binResult.rows) ? binResult.rows : [];
+
         if (bins.length === 0) {
             return res.status(404).json({ 
                 success: false, 
@@ -318,10 +325,17 @@ router.patch('/:id/level', async (req, res) => {
         }
 
         // Update bin
-        await db.query(
-            'UPDATE bins SET fill_level = ?, status = ? WHERE id = ?',
+        const updateLevelResult = await db.query(
+            'UPDATE bins SET fill_level = $1, status = $2 WHERE id = $3',
             [fill_level, newStatus, binId]
         );
+
+        if (!updateLevelResult || updateLevelResult.rowCount === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Bin not found'
+            });
+        }
 
         // Create notification if status changed to critical or warning
         if (newStatus === 'critical' && bin.status !== 'critical') {
@@ -331,27 +345,30 @@ router.patch('/:id/level', async (req, res) => {
             if (bin.assigned_to) {
                 await db.query(
                     `INSERT INTO notifications (user_id, bin_id, type, title, message) 
-                     VALUES (?, ?, 'critical', 'Urgent Collection Required', ?)`,
+                     VALUES ($1, $2, 'critical', 'Urgent Collection Required', $3)`,
                     [bin.assigned_to, binId, notificationMessage]
                 );
 
-                mqttService.publishNotification(bin.assigned_to, {
-                    type: 'critical',
-                    title: 'Urgent Collection Required',
-                    message: notificationMessage,
-                    bin_id: binId,
-                    bin_code: bin.bin_code,
-                    fill_level: fill_level,
-                    timestamp: new Date()
-                });
+                if (typeof mqttService !== 'undefined' && mqttService && mqttService.publishNotification) {
+                    mqttService.publishNotification(bin.assigned_to, {
+                        type: 'critical',
+                        title: 'Urgent Collection Required',
+                        message: notificationMessage,
+                        bin_id: binId,
+                        bin_code: bin.bin_code,
+                        fill_level: fill_level,
+                        timestamp: new Date()
+                    });
+                }
             }
 
             // Also notify admins
-            const [admins] = await db.query('SELECT id FROM users WHERE role = "admin"');
+            const adminsResult = await db.query('SELECT id FROM users WHERE role = $1', ['admin']);
+            const admins = Array.isArray(adminsResult.rows) ? adminsResult.rows : [];
             for (const admin of admins) {
                 await db.query(
                     `INSERT INTO notifications (user_id, bin_id, type, title, message) 
-                     VALUES (?, ?, 'critical', 'Critical Bin Alert', ?)`,
+                     VALUES ($1, $2, 'critical', 'Critical Bin Alert', $3)`,
                     [admin.id, binId, notificationMessage]
                 );
             }
@@ -361,25 +378,29 @@ router.patch('/:id/level', async (req, res) => {
                 
                 await db.query(
                     `INSERT INTO notifications (user_id, bin_id, type, title, message) 
-                     VALUES (?, ?, 'warning', 'Collection Recommended', ?)`,
+                     VALUES ($1, $2, 'warning', 'Collection Recommended', $3)`,
                     [bin.assigned_to, binId, notificationMessage]
                 );
 
-                mqttService.publishNotification(bin.assigned_to, {
-                    type: 'warning',
-                    title: 'Collection Recommended',
-                    message: notificationMessage,
-                    bin_id: binId,
-                    bin_code: bin.bin_code,
-                    fill_level: fill_level,
-                    timestamp: new Date()
-                });
+                if (typeof mqttService !== 'undefined' && mqttService && mqttService.publishNotification) {
+                    mqttService.publishNotification(bin.assigned_to, {
+                        type: 'warning',
+                        title: 'Collection Recommended',
+                        message: notificationMessage,
+                        bin_id: binId,
+                        bin_code: bin.bin_code,
+                        fill_level: fill_level,
+                        timestamp: new Date()
+                    });
+                }
             }
         }
 
         // Publish to MQTT
-        mqttService.publishBinLevel(bin.bin_code, fill_level);
-        mqttService.publishBinStatus(bin.bin_code, { status: newStatus, fill_level });
+        if (typeof mqttService !== 'undefined' && mqttService) {
+            if (mqttService.publishBinLevel) mqttService.publishBinLevel(bin.bin_code, fill_level);
+            if (mqttService.publishBinStatus) mqttService.publishBinStatus(bin.bin_code, { status: newStatus, fill_level });
+        }
 
         res.json({
             success: true,
@@ -459,9 +480,9 @@ router.post('/:id/collect', authenticateToken, async (req, res) => {
         const updateResult = await db.query(updateBinQuery, [binId]);
 
         if (!updateResult || updateResult.rowCount === 0) {
-            return res.status(400).json({
+            return res.status(404).json({
                 success: false,
-                message: 'Bin status could not be updated'
+                message: 'Bin not found'
             });
         }
 
@@ -514,26 +535,14 @@ router.delete('/:id', authenticateToken, authorizeRole('admin'), async (req, res
     try {
         const binId = req.params.id;
 
-        const checkQuery = 'SELECT id FROM bins WHERE id = $1';
-        console.log('Delete bin check query:', checkQuery, 'params:', [binId]);
-        const binsResult = await db.query(checkQuery, [binId]);
-        const bins = binsResult.rows || [];
-
-        if (bins.length === 0) {
-            return res.status(404).json({ 
-                success: false, 
-                message: 'Bin not found' 
-            });
-        }
-
         const deleteQuery = 'DELETE FROM bins WHERE id = $1';
         console.log('Delete bin query:', deleteQuery, 'params:', [binId]);
         const deleteResult = await db.query(deleteQuery, [binId]);
 
         if (!deleteResult || deleteResult.rowCount === 0) {
-            return res.status(400).json({
+            return res.status(404).json({
                 success: false,
-                message: 'Bin could not be deleted'
+                message: 'Bin not found'
             });
         }
 

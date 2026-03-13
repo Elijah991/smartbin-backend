@@ -98,10 +98,11 @@ router.post('/login', async (req, res) => {
 // Get current user profile
 router.get('/profile', authenticateToken, async (req, res) => {
     try {
-        const [users] = await db.query(
-            'SELECT id, name, email, role, phone, status, created_at, last_login FROM users WHERE id = ?',
+        const result = await db.query(
+            'SELECT id, name, email, role, phone, status, created_at, last_login FROM users WHERE id = $1',
             [req.user.id]
         );
+        const users = Array.isArray(result.rows) ? result.rows : [];
 
         if (users.length === 0) {
             return res.status(404).json({ 
@@ -144,10 +145,11 @@ router.post('/change-password', authenticateToken, async (req, res) => {
         }
 
         // Get current user
-        const [users] = await db.query(
-            'SELECT password_hash FROM users WHERE id = ?',
+        const usersResult = await db.query(
+            'SELECT password_hash FROM users WHERE id = $1',
             [req.user.id]
         );
+        const users = Array.isArray(usersResult.rows) ? usersResult.rows : [];
 
         if (users.length === 0) {
             return res.status(404).json({ 
@@ -170,10 +172,17 @@ router.post('/change-password', authenticateToken, async (req, res) => {
         const hashedPassword = await bcrypt.hash(newPassword, 10);
 
         // Update password
-        await db.query(
-            'UPDATE users SET password_hash = ? WHERE id = ?',
+        const updateResult = await db.query(
+            'UPDATE users SET password_hash = $1 WHERE id = $2',
             [hashedPassword, req.user.id]
         );
+
+        if (!updateResult || updateResult.rowCount === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'User not found'
+            });
+        }
 
         res.json({
             success: true,
