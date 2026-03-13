@@ -553,17 +553,10 @@ router.delete('/:id', authenticateToken, authorizeRole('admin'), async (req, res
 
     } catch (error) {
         console.error('Delete bin error:', error);
-
-        if (error.code === '23503') {
-            return res.status(400).json({
-                success: false,
-                message: 'Cannot delete bin because there are related records (e.g. collections)'
-            });
-        }
-
         res.status(500).json({ 
             success: false, 
-            message: 'Server error' 
+            message: 'Database error while deleting bin',
+            error: error.message
         });
     }
 });
