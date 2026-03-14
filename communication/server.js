@@ -55,6 +55,30 @@ app.use('/api/directions', directionsRoutes);
 //app.use('/api/notifications', notificationRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 
+// Test notification route
+app.get('/test-notif', async (req, res) => {
+    try {
+        const result = await db.query('SELECT fcm_token FROM users WHERE email = $1', ['admin@smartbin.com']);
+        if (result.rows.length === 0 || !result.rows[0].fcm_token) {
+            return res.json({ message: "User/Token not found" });
+        }
+        const userToken = result.rows[0].fcm_token;
+        const messaging = require('./firebaseAdmin');
+        const message = {
+            notification: {
+                title: 'SmartBin Test',
+                body: 'Success! Your backend is talking to Firebase.'
+            },
+            token: userToken
+        };
+        await messaging.send(message);
+        res.json({ message: "Notification sent!" });
+    } catch (error) {
+        console.error('Error sending test notification:', error);
+        res.status(500).json({ message: "Error sending notification" });
+    }
+});
+
 // 404 handler
 app.use((req, res) => {
     res.status(404).json({ 
