@@ -2,10 +2,10 @@
   "name": "smartbin-backend",
   "version": "1.0.0",
   "description": "",
-  "main": "communication/server.js",
+  "main": "index.js",
   "scripts": {
-    "start": "node communication/server.js",
-    "dev": "NODE_ENV=development node communication/server.js",
+    "start": "node index.js",
+    "dev": "NODE_ENV=development node index.js",
     "seed": "node seed-user.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
@@ -19,6 +19,7 @@
     "dotenv": "^17.2.4",
     "express": "^5.2.1",
     "jsonwebtoken": "^9.0.3",
-    "pg": "^8.20.0"
+    "pg": "^8.20.0",
+    "firebase-admin": "^12.0.0"
   }
 }
