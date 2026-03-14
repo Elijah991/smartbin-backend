@@ -1,3 +1,5 @@
+console.log("🚀 Firebase Admin file is being loaded...");
+
 const admin = require('firebase-admin');
 
 try {
