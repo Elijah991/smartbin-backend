@@ -82,6 +82,41 @@ router.get('/collectors', authenticateToken, authorizeRole('admin'), async (req,
     }
 });
 
+// Update FCM token for the logged-in user
+router.patch('/update-fcm', authenticateToken, async (req, res) => {
+    try {
+        const { fcm_token } = req.body;
+
+        if (!fcm_token || typeof fcm_token !== 'string') {
+            return res.status(400).json({
+                success: false,
+                message: 'Valid fcm_token is required'
+            });
+        }
+
+        const updateQuery = 'UPDATE users SET fcm_token = $1 WHERE id = $2';
+        const result = await db.query(updateQuery, [fcm_token, req.user.id]);
+
+        if (!result || result.rowCount === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'User not found or token not updated'
+            });
+        }
+
+        res.json({
+            success: true,
+            message: 'FCM token updated successfully'
+        });
+    } catch (error) {
+        console.error('Update FCM token error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Server error'
+        });
+    }
+});
+
 // Get single user by ID (Admin only)
 router.get('/:id', authenticateToken, authorizeRole('admin'), async (req, res) => {
     try {
