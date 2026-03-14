@@ -80,6 +80,17 @@ app.get('/test-notif', async (req, res) => {
     }
 });
 
+// Database check route
+app.get('/db-check', async (req, res) => {
+  try {
+    const result = await db.query("SELECT email, fcm_token FROM users WHERE email = 'admin@smartbin.com'");
+    if (result.rows.length === 0) return res.send("❌ User 'admin@smartbin.com' not found.");
+    res.send(`✅ User found! Token status: ${result.rows[0].fcm_token ? 'Has Token' : 'No Token'}`);
+  } catch (err) {
+    res.status(500).send("❌ DB Error: " + err.message);
+  }
+});
+
 // 404 handler
 app.use((req, res) => {
     res.status(404).json({ 
