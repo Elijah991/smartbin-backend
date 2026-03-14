@@ -57,6 +57,7 @@ app.use('/api/dashboard', dashboardRoutes);
 
 // Test notification route
 app.get('/test-notif', async (req, res) => {
+    console.log("Checking token for admin@smartbin.com...");
     try {
         const result = await db.query('SELECT fcm_token FROM users WHERE email = $1', ['admin@smartbin.com']);
         if (result.rows.length === 0 || !result.rows[0].fcm_token) {
