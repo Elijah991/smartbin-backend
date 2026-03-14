@@ -12,8 +12,10 @@ const sendBinAlert = async (fcmToken, binCode, status) => {
   try {
     const response = await messaging.send(message);
     console.log('Notification sent successfully:', response);
+    return response;
   } catch (error) {
     console.error('Notification failed:', error);
+    throw error;
   }
 };
 

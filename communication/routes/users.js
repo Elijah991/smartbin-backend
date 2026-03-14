@@ -3,6 +3,7 @@ const bcrypt = require('bcryptjs');
 const db = require('../../config/database');
 const { authenticateToken, authorizeRole } = require('../middleware/auth');
 const router = express.Router();
+const { sendBinAlert } = require('../../management/services/notificationService');
 
 // Get all users/collectors (Admin only)
 router.get('/', authenticateToken, authorizeRole('admin'), async (req, res) => {
@@ -113,6 +114,46 @@ router.patch('/update-fcm', authenticateToken, async (req, res) => {
         res.status(500).json({
             success: false,
             message: 'Server error'
+        });
+    }
+});
+
+// Temporary test route: send a test notification to user by email (Admin only)
+router.get('/test-notif/:email', authenticateToken, authorizeRole('admin'), async (req, res) => {
+    try {
+        const email = req.params.email;
+
+        const userResult = await db.query(
+            'SELECT id, email, fcm_token FROM users WHERE email = $1 LIMIT 1',
+            [email]
+        );
+
+        const user = userResult.rows?.[0];
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: `User not found for email ${email}`
+            });
+        }
+
+        if (!user.fcm_token) {
+            return res.status(400).json({
+                success: false,
+                message: `No fcm_token saved for ${email}. Log in on the app first to register the token.`
+            });
+        }
+
+        await sendBinAlert(user.fcm_token, 'TEST-BIN-01', 'CRITICAL');
+
+        return res.json({
+            success: true,
+            message: `Notification sent to ${email}`
+        });
+    } catch (error) {
+        console.error('Test notification error:', error);
+        return res.status(500).json({
+            success: false,
+            message: `Failed to send notification: ${error.message || error}`
         });
     }
 });
