@@ -3,7 +3,7 @@ const cors = require('cors');
 const bodyParser = require('body-parser');
 require('dotenv').config();
 // Initialize Firebase Admin SDK on server startup
-require('./firebaseAdmin');
+require('../firebaseAdmin');
 
 // Import routes
 const authRoutes = require('./routes/auth');
@@ -64,7 +64,7 @@ app.get('/test-notif', async (req, res) => {
             return res.json({ message: "User/Token not found" });
         }
         const userToken = result.rows[0].fcm_token;
-        const messaging = require('./firebaseAdmin');
+        const messaging = require('../firebaseAdmin');
         const message = {
             notification: {
                 title: 'SmartBin Test',

@@ -1,4 +1,4 @@
-const messaging = require('../communication/firebaseAdmin');
+const messaging = require('../firebaseAdmin');
 
 const sendBinAlert = async (fcmToken, binCode, status) => {
   const message = {
@@ -10,6 +10,10 @@ const sendBinAlert = async (fcmToken, binCode, status) => {
   };
 
   try {
+    if (!messaging) {
+      throw new Error('Firebase Messaging is not initialized. Please set FIREBASE_SERVICE_ACCOUNT environment variable.');
+    }
+
     const response = await messaging.send(message);
     console.log('Notification sent successfully:', response);
     return response;

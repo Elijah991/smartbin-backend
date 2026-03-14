@@ -20,4 +20,5 @@ try {
   console.error("❌ Firebase Initialization Error:", error.message);
 }
 
-module.exports = admin.messaging();
+const messaging = admin.apps.length ? admin.messaging() : null;
+module.exports = messaging;

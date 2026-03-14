@@ -1,7 +1,7 @@
 require('dotenv').config();
 
 // Initialize Firebase Admin as early as possible
-require('./communication/firebaseAdmin');
+require('./firebaseAdmin');
 
 // Start the main Express server
 require('./communication/server');
