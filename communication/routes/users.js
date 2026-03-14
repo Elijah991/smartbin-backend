@@ -3,7 +3,7 @@ const bcrypt = require('bcryptjs');
 const db = require('../../config/database');
 const { authenticateToken, authorizeRole } = require('../middleware/auth');
 const router = express.Router();
-const { sendBinAlert } = require('../services/notificationService');
+const { sendBinAlert } = require('../../services/notificationService');
 
 // Get all users/collectors (Admin only)
 router.get('/', authenticateToken, authorizeRole('admin'), async (req, res) => {
