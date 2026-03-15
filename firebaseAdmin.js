@@ -11,11 +11,13 @@ try {
     const serviceAccount = JSON.parse(decodedString);
     serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
 
-    if (!admin.apps.length) {
+    if (admin.apps.length === 0) {
       admin.initializeApp({
         credential: admin.credential.cert(serviceAccount),
       });
       console.log("✅ Firebase Admin successfully initialized!");
+    } else {
+      console.log("ℹ️ Using existing Firebase Admin instance.");
     }
   }
 } catch (error) {
