@@ -31,6 +31,14 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Normalize double slashes in URLs (e.g. //test-notif) so Express routes match.
+app.use((req, res, next) => {
+    if (req.url.includes('//')) {
+        req.url = req.url.replace(/\/\/+/g, '/');
+    }
+    next();
+});
+
 // Request logging
 app.use((req, res, next) => {
     console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
