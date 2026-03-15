@@ -3,51 +3,43 @@ const db = require('../config/database');
 const { authenticateToken } = require('../communication/middleware/auth');
 const router = express.Router();
 
-// Get user notifications
+// Get notifications history
 router.get('/', authenticateToken, async (req, res) => {
     try {
-        const { is_read, type, limit = 50 } = req.query;
-        
+        const { limit = 50 } = req.query;
+
+        // Admins see all notifications; collectors see only those for bins assigned to them
         let query = `
             SELECT n.*, b.bin_code, b.location as bin_location
             FROM notifications n
             LEFT JOIN bins b ON n.bin_id = b.id
-            WHERE (n.user_id = ? OR n.user_id IS NULL)
         `;
-        const params = [req.user.id];
+        const params = [];
 
-        if (is_read !== undefined) {
-            query += ' AND n.is_read = ?';
-            params.push(is_read === 'true' ? 1 : 0);
+        if (req.user.role === 'admin') {
+            query += ' ORDER BY n.created_at DESC LIMIT $1';
+            params.push(parseInt(limit, 10));
+        } else {
+            query += `
+                WHERE b.assigned_to = $1
+                ORDER BY n.created_at DESC
+                LIMIT $2
+            `;
+            params.push(req.user.id, parseInt(limit, 10));
         }
 
-        if (type) {
-            query += ' AND n.type = ?';
-            params.push(type);
-        }
-
-        query += ' ORDER BY n.created_at DESC LIMIT ?';
-        params.push(parseInt(limit));
-
-        const [notifications] = await db.query(query, params);
-
-        // Get unread count
-        const [unreadCount] = await db.query(
-            'SELECT COUNT(*) as count FROM notifications WHERE (user_id = ? OR user_id IS NULL) AND is_read = FALSE',
-            [req.user.id]
-        );
+        const result = await db.query(query, params);
+        const notifications = Array.isArray(result.rows) ? result.rows : [];
 
         res.json({
             success: true,
-            data: notifications,
-            unread_count: unreadCount[0].count
+            data: notifications
         });
-
     } catch (error) {
         console.error('Get notifications error:', error);
-        res.status(500).json({ 
-            success: false, 
-            message: 'Server error' 
+        res.status(500).json({
+            success: false,
+            message: 'Server error'
         });
     }
 });

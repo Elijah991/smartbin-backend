@@ -10,7 +10,7 @@ const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/users');
 const binRoutes = require('./routes/bins');
 const directionsRoutes = require('./routes/directions');
-//const notificationRoutes = require('./routes/notifications');
+const notificationRoutes = require('../management/notification');
 const db = require('../config/database');
 const dashboardRoutes = require('../management/dashboard');
 
@@ -60,7 +60,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/bins', binRoutes);
 app.use('/api/directions', directionsRoutes);
-//app.use('/api/notifications', notificationRoutes);
+app.use('/api/notifications', notificationRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 
 // Test notification route
