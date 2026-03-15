@@ -1,4 +1,4 @@
-const messaging = require('../firebaseAdmin');
+const messaging = require('../FirebaseAdmin');
 
 const sendBinAlert = async (fcmToken, binCode, status) => {
   const message = {
