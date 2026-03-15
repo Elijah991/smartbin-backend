@@ -1,6 +1,7 @@
 const express = require('express');
 const db = require('../../config/database');
 // const mqttService = require('../services/mqttService');
+const { sendBinAlert } = require('../../services/notificationService');
 const { authenticateToken, authorizeRole } = require('../middleware/auth');
 const router = express.Router();
 
@@ -183,6 +184,129 @@ router.post('/', authenticateToken, authorizeRole('admin'), async (req, res) => 
         res.status(500).json({ 
             success: false, 
             message: 'Server error' 
+        });
+    }
+});
+
+// Bin Alert endpoint - update status by bin_code
+router.post('/update-status', async (req, res) => {
+    try {
+        const { bin_code, current_weight_or_dist } = req.body;
+
+        if (!bin_code || current_weight_or_dist === undefined) {
+            return res.status(400).json({
+                success: false,
+                message: 'bin_code and current_weight_or_dist are required'
+            });
+        }
+
+        const fillLevel = parseInt(current_weight_or_dist, 10);
+
+        if (Number.isNaN(fillLevel) || fillLevel < 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'current_weight_or_dist must be a non-negative integer'
+            });
+        }
+
+        // Find bin by bin_code
+        const binResult = await db.query('SELECT * FROM bins WHERE bin_code = $1', [bin_code]);
+        const bins = Array.isArray(binResult.rows) ? binResult.rows : [];
+
+        if (bins.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Bin not found'
+            });
+        }
+
+        const bin = bins[0];
+        const capacity = bin.capacity || 0;
+
+        // Avoid division by zero; treat missing/zero capacity as 1
+        const safeCapacity = capacity > 0 ? capacity : 1;
+        const percentage = (fillLevel / safeCapacity) * 100;
+        const roundedPercentage = Math.round(percentage);
+
+        // Determine status based on percentage
+        let newStatus = 'normal';
+        if (roundedPercentage >= 90) {
+            newStatus = 'critical';
+        } else if (roundedPercentage >= 70) {
+            newStatus = 'warning';
+        }
+
+        // Update bin in database (store raw fill_level, keep capacity as is)
+        const updateResult = await db.query(
+            'UPDATE bins SET fill_level = $1, status = $2 WHERE id = $3',
+            [fillLevel, newStatus, bin.id]
+        );
+
+        if (!updateResult || updateResult.rowCount === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Bin not found'
+            });
+        }
+
+        // If status is critical, create notification and send push to admin (if available)
+        if (newStatus === 'critical') {
+            const notificationMessage = `Bin ${bin.bin_code} at ${bin.location} is ${roundedPercentage}% full and requires immediate attention`;
+
+            // Find an admin user
+            const adminResult = await db.query(
+                'SELECT id, fcm_token FROM users WHERE role = $1 ORDER BY id LIMIT 1',
+                ['admin']
+            );
+            const admins = Array.isArray(adminResult.rows) ? adminResult.rows : [];
+
+            if (admins.length > 0) {
+                const admin = admins[0];
+
+                // Create notification record
+                await db.query(
+                    `INSERT INTO notifications (user_id, bin_id, type, title, message)
+                     VALUES ($1, $2, 'critical', $3, $4)`,
+                    [
+                        admin.id,
+                        bin.id,
+                        'Critical Bin Alert',
+                        notificationMessage
+                    ]
+                );
+
+                // Send FCM push notification if admin has a token
+                if (admin.fcm_token) {
+                    try {
+                        await sendBinAlert(
+                            admin.fcm_token,
+                            bin.bin_code,
+                            `${roundedPercentage}% full`
+                        );
+                    } catch (notifyError) {
+                        console.error('Failed to send critical bin alert notification:', notifyError.message);
+                        // Do not fail the main request if push notification fails
+                    }
+                }
+            }
+        }
+
+        return res.json({
+            success: true,
+            message: 'Bin status updated successfully',
+            data: {
+                bin_code: bin.bin_code,
+                fill_level: fillLevel,
+                capacity: capacity,
+                percentage: roundedPercentage,
+                status: newStatus
+            }
+        });
+    } catch (error) {
+        console.error('Update bin status error:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Server error'
         });
     }
 });
