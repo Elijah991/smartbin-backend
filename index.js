@@ -1,4 +1,4 @@
-require('./FirebaseAdmin');
+require('./firebaseAdmin');
 
 require('dotenv').config();
 
