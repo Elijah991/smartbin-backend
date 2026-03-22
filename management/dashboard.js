@@ -88,6 +88,19 @@ router.get('/admin', authenticateToken, authorizeRole('admin'), async (req, res)
             ? binsByStatusResult.rows
             : [];
 
+        // Recent collections activity for dashboard
+        const recentCollectionsResult = await db.query(`
+            SELECT c.id, c.collection_time, b.bin_code, b.location, u.name AS collector_name
+            FROM collections c
+            JOIN bins b ON c.bin_id = b.id
+            JOIN users u ON c.collector_id = u.id
+            ORDER BY c.collection_time DESC
+            LIMIT 5
+        `);
+        const recentCollections = Array.isArray(recentCollectionsResult.rows)
+            ? recentCollectionsResult.rows
+            : [];
+
         const overviewObj = {
             total_bins: Number(totalBinsRow.count || 0),
             critical_bins: Number(criticalBinsRow.count || 0),
@@ -108,7 +121,8 @@ router.get('/admin', authenticateToken, authorizeRole('admin'), async (req, res)
                 overview: overviewObj,
                 daily_collections: dailyCollections,
                 top_collectors: topCollectors,
-                bins_by_status: binsByStatus
+                bins_by_status: binsByStatus,
+                recent_collections: recentCollections
             }
         });
 
