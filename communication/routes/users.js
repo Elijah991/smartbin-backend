@@ -5,13 +5,20 @@ const { authenticateToken, authorizeRole } = require('../middleware/auth');
 const router = express.Router();
 const { sendBinAlert } = require('../../services/notificationService');
 
+/** Same rules as bin zones: trim, empty → null, max 120 chars (matches bins.zone VARCHAR(120)). */
+function normalizeUserZone(z) {
+    if (z == null || String(z).trim() === '') return null;
+    const t = String(z).trim();
+    return t.length > 120 ? t.slice(0, 120) : t;
+}
+
 // Get all users/collectors (Admin only)
 router.get('/', authenticateToken, authorizeRole('admin'), async (req, res) => {
     try {
         const { role, status } = req.query;
         
         let query = `
-            SELECT u.id, u.name, u.email, u.role, u.phone, u.status, 
+            SELECT u.id, u.name, u.email, u.role, u.phone, u.zone, u.status, 
                    u.created_at, u.last_login,
                    COUNT(DISTINCT b.id) AS assigned_bins,
                    COUNT(DISTINCT c.id) AS total_collections
@@ -35,7 +42,7 @@ router.get('/', authenticateToken, authorizeRole('admin'), async (req, res) => {
 
         query += `
             GROUP BY 
-                u.id, u.name, u.email, u.role, u.phone, u.status, 
+                u.id, u.name, u.email, u.role, u.phone, u.zone, u.status, 
                 u.created_at, u.last_login
             ORDER BY u.created_at DESC
         `;
@@ -164,7 +171,7 @@ router.get('/:id', authenticateToken, authorizeRole('admin'), async (req, res) =
         const userId = req.params.id;
 
         const result = await db.query(
-            `SELECT id, name, email, role, phone, status, created_at, last_login
+            `SELECT id, name, email, role, phone, zone, status, created_at, last_login
              FROM users
              WHERE id = $1`,
             [userId]
@@ -194,7 +201,7 @@ router.get('/:id', authenticateToken, authorizeRole('admin'), async (req, res) =
 // Create new user (Admin only)
 router.post('/', authenticateToken, authorizeRole('admin'), async (req, res) => {
     try {
-        const { name, email, password, role, phone } = req.body;
+        const { name, email, password, role, phone, zone } = req.body;
 
         // Validation
         if (!name || !email || !password) {
@@ -228,11 +235,13 @@ router.post('/', authenticateToken, authorizeRole('admin'), async (req, res) => 
         // Hash password
         const hashedPassword = await bcrypt.hash(password, 10);
 
+        const zoneVal = normalizeUserZone(zone);
+
         // Insert user
         const insertQuery = `
-            INSERT INTO users (name, email, password_hash, role, phone, status)
-            VALUES ($1, $2, $3, $4, $5, $6)
-            RETURNING id, name, email, role, phone
+            INSERT INTO users (name, email, password_hash, role, phone, zone, status)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            RETURNING id, name, email, role, phone, zone
         `;
         console.log('Create user insert query:', insertQuery.trim(), 'params:', [
             name,
@@ -240,6 +249,7 @@ router.post('/', authenticateToken, authorizeRole('admin'), async (req, res) => 
             hashedPassword,
             role || 'collector',
             phone || null,
+            zoneVal,
             'active'
         ]);
         const insertResult = await db.query(insertQuery, [
@@ -248,6 +258,7 @@ router.post('/', authenticateToken, authorizeRole('admin'), async (req, res) => 
             hashedPassword,
             role || 'collector',
             phone || null,
+            zoneVal,
             'active'
         ]);
         const newUser = insertResult.rows[0];
@@ -271,7 +282,7 @@ router.post('/', authenticateToken, authorizeRole('admin'), async (req, res) => 
 
 const updateUserHandler = async (req, res) => {
     try {
-        const { name, email, phone, role, status } = req.body;
+        const { name, email, phone, zone, role, status } = req.body;
         const userId = req.params.id;
 
         // Build update query dynamically
@@ -297,8 +308,12 @@ const updateUserHandler = async (req, res) => {
             updates.push(`email = $${params.length}`);
         }
         if (phone !== undefined) {
-            params.push(phone);
+            params.push(phone == null || String(phone).trim() === '' ? null : String(phone).trim());
             updates.push(`phone = $${params.length}`);
+        }
+        if (zone !== undefined) {
+            params.push(normalizeUserZone(zone));
+            updates.push(`zone = $${params.length}`);
         }
         if (role) {
             params.push(role);
