@@ -557,115 +557,131 @@ router.patch('/:id/level', async (req, res) => {
     }
 });
 
-// Mark bin as collected
-router.post('/:id/collect', authenticateToken, async (req, res) => {
-    try {
-        const binId = req.body.id || req.params.id;
+// Collection handshake: record history + reset bin (admin or assigned collector only)
+router.post(
+    '/:id/collect',
+    authenticateToken,
+    authorizeRole('admin', 'collector'),
+    async (req, res) => {
+        const binId = req.params.id || req.body.id;
         const { notes } = req.body;
 
         if (!binId) {
             return res.status(400).json({
                 success: false,
-                message: 'binId is required'
+                message: 'Bin id is required',
             });
         }
 
-        // Get bin details
-        const binQuery = 'SELECT * FROM bins WHERE id = $1';
-        console.log('Collect bin get query:', binQuery, 'params:', [binId]);
-        const binsResult = await db.query(binQuery, [binId]);
-        const bins = binsResult.rows || [];
-        
-        if (bins.length === 0) {
-            return res.status(404).json({ 
-                success: false, 
-                message: 'Bin not found' 
-            });
-        }
+        const client = await db.connect();
+        try {
+            await client.query('BEGIN');
 
-        const bin = bins[0];
+            const binResult = await client.query('SELECT * FROM bins WHERE id = $1', [binId]);
+            const bins = binResult.rows || [];
 
-        // If collector, ensure they can only collect their assigned bins
-        if (req.user.role === 'collector' && bin.assigned_to !== req.user.id) {
-            return res.status(403).json({ 
-                success: false, 
-                message: 'You can only collect bins assigned to you' 
-            });
-        }
-
-        const fillLevelBefore = bin.fill_level;
-
-        // Record collection
-        const insertCollectionQuery = `
-            INSERT INTO collections (bin_id, collector_id, fill_level_before, fill_level_after, notes) 
-            VALUES ($1, $2, $3, 0, $4)
-        `;
-        console.log('Collect bin insert collection query:', insertCollectionQuery.trim(), 'params:', [
-            binId, req.user.id, fillLevelBefore, notes || null
-        ]);
-        await db.query(insertCollectionQuery, [
-            binId, req.user.id, fillLevelBefore, notes || null
-        ]);
-
-        // Update bin status
-        const updateBinQuery = `
-            UPDATE bins
-            SET fill_level = 0, status = 'normal', last_collection = NOW()
-            WHERE id = $1
-        `;
-        console.log('Collect bin update bin query:', updateBinQuery.trim(), 'params:', [binId]);
-        const updateResult = await db.query(updateBinQuery, [binId]);
-
-        if (!updateResult || updateResult.rowCount === 0) {
-            return res.status(404).json({
-                success: false,
-                message: 'Bin not found'
-            });
-        }
-
-        // Create success notification
-        const notificationQuery = `
-            INSERT INTO notifications (user_id, bin_id, type, title, message) 
-            VALUES ($1, $2, 'success', 'Collection Completed', $3)
-        `;
-        console.log('Collect bin notification query:', notificationQuery.trim(), 'params:', [
-            req.user.id, binId, `You successfully collected bin ${bin.bin_code}`
-        ]);
-        await db.query(notificationQuery, [
-            req.user.id, binId, `You successfully collected bin ${bin.bin_code}`
-        ]);
-
-        // Publish to MQTT
-        if (typeof mqttService !== 'undefined') {
-            if (mqttService.publishBinLevel) {
-                mqttService.publishBinLevel(bin.bin_code, 0);
-            }
-            if (mqttService.publishBinStatus) {
-                mqttService.publishBinStatus(bin.bin_code, { 
-                    status: 'normal', 
-                    fill_level: 0,
-                    last_collection: new Date()
+            if (bins.length === 0) {
+                await client.query('ROLLBACK');
+                return res.status(404).json({
+                    success: false,
+                    message: 'Bin not found',
                 });
             }
-        }
 
-        res.json({
-            success: true,
-            message: 'Bin marked as collected',
-            data: {
-                bin_code: bin.bin_code,
-                fill_level_before: fillLevelBefore
+            const bin = bins[0];
+
+            if (req.user.role === 'collector' && bin.assigned_to !== req.user.id) {
+                await client.query('ROLLBACK');
+                return res.status(403).json({
+                    success: false,
+                    message: 'You can only collect bins assigned to you',
+                });
             }
-        });
 
-    } catch (error) {
-        console.error('Collect bin error:', error);
-        res.status(500).json({ 
-            success: false, 
-            message: 'Server error' 
-        });
+            const fillLevelBefore = Number(bin.fill_level);
+            if (!Number.isFinite(fillLevelBefore) || fillLevelBefore <= 0) {
+                await client.query('ROLLBACK');
+                return res.status(400).json({
+                    success: false,
+                    message: 'Bin is already empty',
+                });
+            }
+
+            await client.query(
+                `INSERT INTO collections (bin_id, collector_id, fill_level_before, fill_level_after, notes)
+                 VALUES ($1, $2, $3, 0, $4)`,
+                [binId, req.user.id, fillLevelBefore, notes || null]
+            );
+
+            const updateResult = await client.query(
+                `UPDATE bins
+                 SET fill_level = 0,
+                     status = 'normal',
+                     last_collection = NOW(),
+                     last_pickup = NOW(),
+                     updated_at = NOW()
+                 WHERE id = $1`,
+                [binId]
+            );
+
+            if (!updateResult || updateResult.rowCount === 0) {
+                await client.query('ROLLBACK');
+                return res.status(404).json({
+                    success: false,
+                    message: 'Bin not found',
+                });
+            }
+
+            await client.query(
+                `INSERT INTO notifications (user_id, bin_id, type, title, message)
+                 VALUES ($1, $2, 'success', 'Collection Completed', $3)`,
+                [
+                    req.user.id,
+                    binId,
+                    `You successfully collected bin ${bin.bin_code}`,
+                ]
+            );
+
+            await client.query('COMMIT');
+
+            if (typeof mqttService !== 'undefined') {
+                if (mqttService.publishBinLevel) {
+                    mqttService.publishBinLevel(bin.bin_code, 0);
+                }
+                if (mqttService.publishBinStatus) {
+                    mqttService.publishBinStatus(bin.bin_code, {
+                        status: 'normal',
+                        fill_level: 0,
+                        last_collection: new Date(),
+                    });
+                }
+            }
+
+            return res.json({
+                success: true,
+                message: 'Bin marked as collected',
+                data: {
+                    bin_code: bin.bin_code,
+                    fill_level_before: fillLevelBefore,
+                    fill_level_after: 0,
+                },
+            });
+        } catch (error) {
+            try {
+                await client.query('ROLLBACK');
+            } catch (rollbackErr) {
+                console.error('Collect rollback error:', rollbackErr);
+            }
+            console.error('Collect bin error:', error);
+            return res.status(500).json({
+                success: false,
+                message: 'Server error',
+            });
+        } finally {
+            client.release();
+        }
     }
-});
+);
 
 // Delete bin (Admin only)
 router.delete('/:id', authenticateToken, authorizeRole('admin'), async (req, res) => {

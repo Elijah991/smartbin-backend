@@ -9,6 +9,7 @@ require('../firebaseAdmin');
 const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/users');
 const binRoutes = require('./routes/bins');
+const collectionRoutes = require('./routes/collections');
 const directionsRoutes = require('./routes/directions');
 const notificationRoutes = require('../management/notification');
 const db = require('../config/database');
@@ -59,6 +60,7 @@ app.get('/health', (req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/bins', binRoutes);
+app.use('/api/collections', collectionRoutes);
 app.use('/api/directions', directionsRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/dashboard', dashboardRoutes);
