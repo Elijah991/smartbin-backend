@@ -69,33 +69,28 @@ try {
     pool = new Pool(fallbackConfig);
   }
 
-// Run lightweight migrations on startup
-const runMigrations = async () => {
-    try {
-        const migrateFcmToken = require('../migrations/01_add_fcm_token');
-        await migrateFcmToken(pool);
-    } catch (error) {
-        console.error('❌ Database migrations failed:', error.message);
-        console.warn('⚠️ Continuing even though migrations failed. Some features may not work.');
-        // Continue running so the app can still respond (useful in deploys where DB may be temporarily unavailable)
-    }
-};
+const { runSqlMigrations } = require('./sqlMigrations');
 
-// Test database connection and then run migrations
-const initDatabase = async () => {
-    try {
-        const client = await pool.connect();
-        console.log('✅ Database connected successfully');
-        client.release();
+/**
+ * Connect, run SQL migrations from /migrations/*.sql (tracked in migrations_log),
+ * then the legacy JS migration for fcm_token. Must complete before HTTP listens.
+ * @throws {Error} if the database is unreachable or any migration fails
+ */
+async function ensureMigrationsComplete() {
+  const client = await pool.connect();
+  try {
+    await client.query('SELECT 1');
+    console.log('✅ Database connected successfully');
+  } finally {
+    client.release();
+  }
 
-        await runMigrations();
-    } catch (error) {
-        console.error('❌ Database initialization failed:', error);
-        console.warn('⚠️ Continuing without a working database connection. Some features may be unavailable.');
-        // Do not exit; allow the service to stay running on platforms like Render.
-    }
-};
+  await runSqlMigrations(pool);
 
-initDatabase();
+  const migrateFcmToken = require('../migrations/01_add_fcm_token');
+  await migrateFcmToken(pool);
+}
+
+pool.ensureMigrationsComplete = ensureMigrationsComplete;
 
 module.exports = pool;

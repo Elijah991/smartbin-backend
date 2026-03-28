@@ -144,17 +144,29 @@ app.use((err, req, res, next) => {
 //     }
 // });
 
-// Start server
-app.listen(PORT, '0.0.0.0', () => {
-    console.log('='.repeat(50));
-    console.log('🚀 SmartBin Backend Server Started');
-    console.log('='.repeat(50));
-    console.log(`📡 Server running on port ${PORT}`);
-    console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
-    console.log(`🌐 Accessible to Emulator at: http://10.0.2.2:${PORT}/api`);
-    console.log(`🔗 API Base URL: http://localhost:${PORT}/api`);
-    console.log('='.repeat(50));
-});
+// Start server only after DB migrations finish (avoids 42703 undefined column on Render)
+async function startServer() {
+    try {
+        await db.ensureMigrationsComplete();
+    } catch (err) {
+        console.error('❌ Startup aborted: database migrations failed:', err.message);
+        console.error(err.stack);
+        process.exit(1);
+    }
+
+    app.listen(PORT, '0.0.0.0', () => {
+        console.log('='.repeat(50));
+        console.log('🚀 SmartBin Backend Server Started');
+        console.log('='.repeat(50));
+        console.log(`📡 Server running on port ${PORT}`);
+        console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
+        console.log(`🌐 Accessible to Emulator at: http://10.0.2.2:${PORT}/api`);
+        console.log(`🔗 API Base URL: http://localhost:${PORT}/api`);
+        console.log('='.repeat(50));
+    });
+}
+
+startServer();
 
 // Graceful shutdown
 // process.on('SIGTERM', () => {
