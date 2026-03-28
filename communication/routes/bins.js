@@ -107,7 +107,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
 // Create new bin (Admin only)
 router.post('/', authenticateToken, authorizeRole('admin'), async (req, res) => {
     try {
-        const { bin_code, location, latitude, longitude, capacity, assigned_to } = req.body;
+        const { bin_code, location, latitude, longitude, capacity, assigned_to, zone } = req.body;
 
         // Validation
         if (!bin_code || !location) {
@@ -131,17 +131,21 @@ router.post('/', authenticateToken, authorizeRole('admin'), async (req, res) => 
             });
         }
 
+        const zoneVal =
+            zone != null && String(zone).trim() !== '' ? String(zone).trim() : null;
+
         // Insert bin
         const insertResult = await db.query(
-            `INSERT INTO bins (bin_code, location, latitude, longitude, capacity, assigned_to, status) 
-             VALUES ($1, $2, $3, $4, $5, $6, $7)
+            `INSERT INTO bins (bin_code, location, zone, latitude, longitude, capacity, assigned_to, status) 
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
              RETURNING id`,
             [
-                bin_code, 
-                location, 
-                latitude || null, 
-                longitude || null, 
-                capacity || 100, 
+                bin_code,
+                location,
+                zoneVal,
+                latitude || null,
+                longitude || null,
+                capacity || 100,
                 assigned_to || null,
                 'normal'
             ]
@@ -314,7 +318,7 @@ router.post('/update-status', async (req, res) => {
 // Update bin (Admin only)
 router.put('/:id', authenticateToken, authorizeRole('admin'), async (req, res) => {
     try {
-        const { location, latitude, longitude, capacity, assigned_to, status } = req.body;
+        const { bin_code, location, latitude, longitude, capacity, assigned_to, status, zone } = req.body;
         const binId = req.params.id;
 
         // Get current bin data
@@ -332,9 +336,18 @@ router.put('/:id', authenticateToken, authorizeRole('admin'), async (req, res) =
         const updates = [];
         const params = [];
 
+        if (bin_code !== undefined && bin_code !== null && String(bin_code).trim() !== '') {
+            params.push(String(bin_code).trim());
+            updates.push(`bin_code = $${params.length}`);
+        }
         if (location) {
             params.push(location);
             updates.push(`location = $${params.length}`);
+        }
+        if (zone !== undefined) {
+            const z = zone == null || String(zone).trim() === '' ? null : String(zone).trim();
+            params.push(z);
+            updates.push(`zone = $${params.length}`);
         }
         if (latitude !== undefined) {
             params.push(latitude);
