@@ -1,6 +1,10 @@
 const express = require('express');
 const db = require('../../config/database');
 const { authenticateToken, authorizeRole } = require('../middleware/auth');
+const {
+    fetchWeeklyReportData,
+    streamWeeklyReportPdf,
+} = require('../../services/weeklyReportService');
 
 const router = express.Router();
 
@@ -118,6 +122,30 @@ router.get(
                 success: false,
                 message: 'Server error',
             });
+        }
+    }
+);
+
+/**
+ * GET /api/analytics/report/weekly
+ * Admin-only PDF download: 7-day activity table, summary, collector leaderboard.
+ */
+router.get(
+    '/report/weekly',
+    authenticateToken,
+    authorizeRole('admin'),
+    async (req, res) => {
+        try {
+            const data = await fetchWeeklyReportData(db);
+            streamWeeklyReportPdf(res, data);
+        } catch (error) {
+            console.error('GET /analytics/report/weekly error:', error);
+            if (!res.headersSent) {
+                res.status(500).json({
+                    success: false,
+                    message: 'Failed to generate weekly report',
+                });
+            }
         }
     }
 );
